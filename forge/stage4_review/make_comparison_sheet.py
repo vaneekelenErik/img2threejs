@@ -249,10 +249,108 @@ def create_sheet(
     }
 
 
+def parse_pair_arg(value: str) -> dict[str, str]:
+    """Parse `role:ref,render` or `role=ref,render`."""
+    text = value.strip()
+    for sep in (":", "="):
+        if sep in text:
+            role, _, rest = text.partition(sep)
+            break
+    else:
+        raise ValueError(f"malformed --pair (expected role:ref,render): {value!r}")
+    parts = [p.strip() for p in rest.split(",")]
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise ValueError(f"malformed --pair (expected role:ref,render): {value!r}")
+    role = role.strip().lower().replace("_", "-").replace(" ", "-") or "primary"
+    return {"role": role, "reference": parts[0], "render": parts[1]}
+
+
+def create_multi_pair_sheet(
+    pairs: list[dict[str, str]],
+    out: Path,
+    width: int,
+    height: int,
+    gutter: int,
+) -> dict:
+    """Package N matched view pairs as rows: left=reference, right=render per role.
+
+    Still one sheet for one vision call — preserves token-efficient review.
+    """
+    if not pairs:
+        raise ValueError("at least one --pair is required for multi-view sheets")
+    panel_w = width
+    panel_h = height
+    header_h = 28
+    rows = len(pairs)
+    canvas_w = panel_w * 2 + gutter * 3
+    canvas_h = rows * (panel_h + header_h) + gutter * (rows + 1)
+    canvas = [(246, 242, 236)] * (canvas_w * canvas_h)
+    packed: list[dict[str, str]] = []
+    for index, pair in enumerate(pairs):
+        y0 = gutter + index * (panel_h + header_h + gutter)
+        fill_rect(canvas, canvas_w, gutter, y0, panel_w, header_h, (40, 45, 48))
+        fill_rect(canvas, canvas_w, gutter * 2 + panel_w, y0, panel_w, header_h, (40, 45, 48))
+        fill_rect(canvas, canvas_w, gutter, y0 + header_h, panel_w, panel_h, (230, 230, 230))
+        fill_rect(canvas, canvas_w, gutter * 2 + panel_w, y0 + header_h, panel_w, panel_h, (230, 230, 230))
+        ref_path = Path(pair["reference"]).expanduser().resolve()
+        ren_path = Path(pair["render"]).expanduser().resolve()
+        ref_w, ref_h, ref_pixels = load_image(ref_path)
+        ren_w, ren_h, ren_pixels = load_image(ren_path)
+        blit(canvas, canvas_w, resize_cover(ref_w, ref_h, ref_pixels, panel_w, panel_h), panel_w, gutter, y0 + header_h)
+        blit(
+            canvas,
+            canvas_w,
+            resize_cover(ren_w, ren_h, ren_pixels, panel_w, panel_h),
+            panel_w,
+            gutter * 2 + panel_w,
+            y0 + header_h,
+        )
+        fill_rect(
+            canvas,
+            canvas_w,
+            panel_w + gutter + gutter // 2,
+            y0,
+            max(2, gutter // 5),
+            panel_h + header_h,
+            (170, 146, 92),
+        )
+        packed.append(
+            {
+                "role": pair["role"],
+                "referenceImage": str(ref_path),
+                "renderScreenshot": str(ren_path),
+            }
+        )
+    write_png_rgb(out, canvas_w, canvas_h, canvas)
+    return {
+        "comparisonImage": str(out.resolve()),
+        "layout": "rows=matched-view-pairs(left=reference,right=render)",
+        "pairs": packed,
+        "panelWidth": panel_w,
+        "panelHeight": panel_h,
+        "rowCount": rows,
+        "note": (
+            "Multi-view turnaround sheet for one AI-vision review call. Score each matched role; "
+            "this script does not score."
+        ),
+    }
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference", type=Path, required=True)
-    parser.add_argument("--render", type=Path, required=True)
+    parser.add_argument("--reference", type=Path, help="Single-pair reference image")
+    parser.add_argument("--render", type=Path, help="Single-pair render screenshot")
+    parser.add_argument(
+        "--pair",
+        action="append",
+        default=[],
+        help="Matched multi-view pair as role:ref,render (repeatable). Builds a turnaround comparison sheet.",
+    )
+    parser.add_argument(
+        "--turnaround",
+        action="store_true",
+        help="Alias that requires one or more --pair entries (explicit multi-view mode)",
+    )
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--panel-width", type=int, default=720)
     parser.add_argument("--panel-height", type=int, default=720)
@@ -260,14 +358,26 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:
-        payload = create_sheet(
-            args.reference.expanduser().resolve(),
-            args.render.expanduser().resolve(),
-            args.out.expanduser().resolve(),
-            max(128, args.panel_width),
-            max(128, args.panel_height),
-            max(6, args.gutter),
-        )
+        out = args.out.expanduser().resolve()
+        panel_w = max(128, args.panel_width)
+        panel_h = max(128, args.panel_height)
+        gutter = max(6, args.gutter)
+        if args.pair or args.turnaround:
+            if not args.pair:
+                raise ValueError("--turnaround requires one or more --pair role:ref,render entries")
+            pairs = [parse_pair_arg(item) for item in args.pair]
+            payload = create_multi_pair_sheet(pairs, out, panel_w, panel_h, gutter)
+        else:
+            if not args.reference or not args.render:
+                raise ValueError("provide --reference and --render, or one or more --pair role:ref,render")
+            payload = create_sheet(
+                args.reference.expanduser().resolve(),
+                args.render.expanduser().resolve(),
+                out,
+                panel_w,
+                panel_h,
+                gutter,
+            )
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

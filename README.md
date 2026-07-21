@@ -9,7 +9,7 @@
 Quality-gated, animation-ready, and deliberately token-efficient — reconstruction-by-code, not photogrammetry, mesh extraction, or downloaded art packs.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](SKILL.md)
+[![Version](https://img.shields.io/badge/version-1.2.1-green.svg)](SKILL.md)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Runtime](https://img.shields.io/badge/runtime-Three.js-000000.svg)](https://threejs.org)
 [![Tooling](https://img.shields.io/badge/tooling-Python%203.10%2B%20stdlib-3776ab.svg)](scripts)
@@ -45,7 +45,7 @@ The gallery source lives in [hoainho/img2threejs-showcase](https://github.com/ho
 
 ## What it does
 
-You give it one reference image of an object. It produces a `THREE.Group` factory written in TypeScript that recreates that object from primitives, procedural shaders, and generated geometry — with a runtime hierarchy (pivots, sockets, colliders) so the result is ready to animate, not an inert lump.
+You give it one reference image of an object — or a **multi-angle set** (separate front/side/back files, or one turnaround sheet) — and it produces a `THREE.Group` factory written in TypeScript that recreates that object from primitives, procedural shaders, and generated geometry — with a runtime hierarchy (pivots, sockets, colliders) so the result is ready to animate, not an inert lump. Multi-angle input improves proportion locks, hidden-side materials, and projection coverage (`grimoire/intake/multi_view_references.md`).
 
 It runs under Claude Code, Codex, or OpenCode. It is agent-agnostic: wherever the docs say "agent vision" or "agent browser tool", it uses whatever the host provides — native image reading, a browser MCP, the project preview, or a user-supplied screenshot.
 
@@ -63,15 +63,16 @@ The skill runs a staged sculpting pipeline. Scripts gate each stage; the agent's
 
 ```mermaid
 flowchart TD
-    A[Reference image] --> B[Probe and suitability gate]
+    A[Reference image or multi-angle set] --> A2[Package referenceViews]
+    A2 --> B[Probe and suitability gate]
     B --> C[Pre-Spec Assessment: class, complexity, quality contract]
     C --> D[Author ObjectSculptSpec: components, materials, sockets]
     D --> E{Validate and strict-quality}
     E -- too shallow --> D
     E -- ok --> F[Locked build passes]
     F --> G[Generate Three.js factory: current pass only]
-    G --> H[Render in browser and screenshot]
-    H --> I[Package one side-by-side sheet]
+    G --> H[Render matched viewpoints]
+    H --> I[Package one comparison sheet or turnaround grid]
     I --> J{Agent vision review}
     J -- score below threshold --> K[Self-correct: refine-spec or refine-code]
     K --> F
@@ -105,17 +106,24 @@ After every pass the agent chooses exactly one action: `continue`, `refine-spec`
 
 ## Quick start
 
-1. **Install** — place this folder in your skills directory:
+1. **Install**
+
+   - **Cursor (this repo):** already wired as a project skill at `.cursor/skills/img2threejs/`. Open a **new** Agent chat and type `/img2threejs`.
+   - **Claude Code / global:** place the folder in your skills directory:
 
    ```bash
    git clone https://github.com/hoainho/img2threejs.git ~/.claude/skills/img2threejs
+   # Cursor global alternative:
+   # ln -s "$(pwd)" ~/.cursor/skills/img2threejs
    ```
 
-2. **Invoke** — in Claude Code, attach or point to an object image and run:
+2. **Invoke** — in Cursor Agent or Claude Code, attach or point to an object image and run:
 
    ```
    /img2threejs Rebuild this object as a Three.js model, keep the proportions, angles, and colours.
    ```
+
+   If `/img2threejs` does not appear in a Cloud Agent slash menu, attach the image and ask: “Use the img2threejs skill (`.cursor/skills/img2threejs`) …” — or `@` the skill / root `SKILL.md`.
 
 3. **Follow the pipeline** — the skill validates the image, writes an assessment and spec, generates the factory pass by pass, and shows you a side-by-side comparison at each step until the render matches.
 
@@ -123,6 +131,9 @@ The scripts run from the skill root and need only Python 3.10+ — nothing to in
 
 ```bash
 python3 forge/stage1_intake/probe_image.py <image>
+# optional multi-angle packaging (separate files or one turnaround sheet):
+# python3 forge/stage1_intake/slice_reference_views.py sheet.png --layout row-3 --out-dir views/ --out views.json
+# python3 forge/stage1_intake/slice_reference_views.py --view front=a.png --view side=b.png --out views.json
 python3 forge/stage2_spec/new_pre_spec_assessment.py "Name" --image <image> --out assessment.json
 python3 forge/stage2_spec/new_sculpt_spec.py "Name" --image <image> --assessment assessment.json --out spec.json
 python3 forge/stage2_spec/validate_sculpt_spec.py spec.json --strict-quality
@@ -151,13 +162,14 @@ The net effect: you still get a faithful 3D model from an image, but the expensi
 | Script | Role |
 | --- | --- |
 | `stage1_intake/probe_image.py` | Image metadata and obvious technical issues (not a visual check). |
+| `stage1_intake/slice_reference_views.py` | Package multi-angle sets or slice a turnaround sheet into `referenceViews[]`. |
 | `stage2_spec/new_pre_spec_assessment.py` | Classify the object, score complexity, emit a quality contract. |
 | `stage2_spec/new_sculpt_spec.py` | Author the ObjectSculptSpec from the assessment. |
 | `stage2_spec/validate_sculpt_spec.py` | Validate the spec; `--strict-quality` blocks shallow specs before codegen. |
 | `stage1_intake/extract_pbr_evidence.py` | Reference-derived PBR evidence per crop (inference, not inverse rendering). |
 | `stage3_build/orchestrate_passes.py` | Locked pass state: status, check, sync. |
 | `stage3_build/generate_threejs_factory.py` | Emit the Three.js `Group` factory for the current unlocked pass. |
-| `stage4_review/make_comparison_sheet.py` | Package one reference-vs-render sheet for review. |
+| `stage4_review/make_comparison_sheet.py` | Package one reference-vs-render sheet (or multi-view turnaround grid) for review. |
 | `stage4_review/append_review.py` | Record a per-pass review: scores, decision, evidence. |
 | `_shared/feature_acceptance_policy.py` | Internal helper enforcing per-feature score thresholds. |
 | `stage1_intake/build_detail_inventory.py` | Slice the reference into zones and scaffold a detail inventory. |
@@ -192,7 +204,7 @@ Full detail and later milestones: [ROADMAP.md](ROADMAP.md). Technical specificat
 
 ## Honesty about limits
 
-A single image cannot reveal hidden sides or guarantee exact geometry. The skill states plainly when output is approximate, stylized, or low-poly, and infers unseen faces by mirroring visible ones rather than faking confidence. It is strong for hard-surface objects; characters are stylized reconstructions, not photoreal likeness. "This cannot reach the requested fidelity from this image" is a valid, expected result.
+A single image cannot reveal hidden sides or guarantee exact geometry. Prefer a multi-angle set (or a turnaround sheet) when fidelity matters — the pipeline packages those as `referenceViews` and reviews matched angles. With only one view, the skill states plainly when output is approximate, stylized, or low-poly, and infers unseen faces by mirroring visible ones rather than faking confidence. It is strong for hard-surface objects; characters are stylized reconstructions, not photoreal likeness. "This cannot reach the requested fidelity from this image" is a valid, expected result.
 
 ---
 
