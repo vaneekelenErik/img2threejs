@@ -45,11 +45,14 @@ Before committing to a character spec:
 
 Ask for:
 
-- front, side, and back views
+- front, side, and back views (separate files **or** one turnaround/contact sheet)
 - a neutral background
 - higher resolution
 - close-ups of material/detail
 - desired style: realistic, stylized, low-poly, game prop, hero render
+
+When multi-angle input arrives, package it with `forge/stage1_intake/slice_reference_views.py`
+and follow `grimoire/intake/multi_view_references.md` — do not keep only the first image.
 
 ## Complex Object Detail Standard
 

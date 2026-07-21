@@ -9,6 +9,7 @@ This roadmap outlines the planned evolution of img2threejs from its initial rele
 | v1.0 | Object pipeline | Shipped | Staged sculpt pipeline (blockout through optimization), render-vs-reference review loop, action-ready runtime hierarchy |
 | v1.1 | Detail-first analysis | Shipped | Required detailInventory artifact (gloss, bevel, fasteners, linework, stains), strict-quality gate blocking shallow specs before codegen |
 | v1.2 | Humanoid character generator | Shipped | Character/hybrid domain detection, anatomy and facial landmarks, proportion-lock and feature-placement build passes, per-part character materials |
+| v1.2.1 | Multi-view references | Shipped | `referenceViews[]`, turnaround-sheet slicer, multi-panel comparison sheets, multi-view projection descriptors |
 | v1.3 | Likeness maximization | Planned | Projection-first path wired into character rendering (camera solve, de-lighting, texture projection), opt-in generativeAssist mode with confidence reporting, high-likeness character demo |
 | v1.4 | Animation-ready rigs | Planned | True humanoid rig and pivot hierarchy (replacing current world-space flatten), SkinnedMesh with morph targets, glTF export |
 | v1.5 | Ecosystem | Planned | Expanded live demo gallery accepting community demos via pull request, broader host and agent coverage, measured token-cost benchmark replacing current estimates |
@@ -23,6 +24,9 @@ Micro-detail capture becomes a required, evidence-linked artifact with its own v
 
 ### v1.2 - Humanoid character generator
 Characters and hybrid subjects are now first-class. The pipeline detects character-like form language and routes the reconstruction through an anatomy-aware track. A humanoid component template with measured head-unit proportions, facial landmark placement, and pose alignment emerges from the assessment. Build passes for proportion-locking and feature-placement gate on anatomical correctness. Per-part character materials (skin, hair, cloth, accessories) integrate with the Track A detail machinery, producing stylized human figures with correct proportions and recognizable likeness.
+
+### v1.2.1 - Multi-view references
+Multi-angle input is first-class: separate front/side/back files or one turnaround/contact sheet can be packaged into `referenceViews[]` via `slice_reference_views.py`. Specs seed per-view evidence, comparison sheets support matched turnaround grids (still one vision call), and projection descriptors prefer observed side/back textures over mirror-symmetry. Workflow: `grimoire/intake/multi_view_references.md`.
 
 ### v1.3 - Likeness maximization
 The projection-first path maximizes likeness for specific people or characters. A parametric humanoid template is fitted to image landmarks, the reference photo is de-lit and camera-matched, then projected onto the fitted mesh as texture. This achieves significantly higher visual fidelity than hand-authored primitives. An optional, clearly flagged generativeAssist mode allows import of a base mesh from external image-to-3D generators, then applies the same projection and material pipeline. Per-region confidence reporting acknowledges unobservable areas (back, sides, occluded geometry) and requests additional views when fidelity matters. A high-likeness character demo showcases the technique.

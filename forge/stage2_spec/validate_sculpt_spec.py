@@ -211,6 +211,90 @@ def validate_terminology_profile(spec: dict[str, Any], errors: list[str], warnin
         errors.append("terminologyProfile.descriptionRule must be a string")
 
 
+def validate_reference_views(spec: dict[str, Any], errors: list[str], warnings: list[str]) -> set[str]:
+    """Validate optional multi-angle referenceViews; keep sourceImage as primary alias."""
+    roles: set[str] = set()
+    views = spec.get("referenceViews")
+    if views is None:
+        return roles
+    if not isinstance(views, list):
+        errors.append("referenceViews must be an array when present")
+        return roles
+    seen_ids: set[str] = set()
+    valid_roles = {
+        "front",
+        "side",
+        "back",
+        "three-quarter",
+        "top",
+        "bottom",
+        "close-up",
+        "custom",
+        "primary",
+    }
+    for index, item in enumerate(views):
+        if not isinstance(item, dict):
+            errors.append(f"referenceViews[{index}] must be an object")
+            continue
+        view_id = item.get("id")
+        if not isinstance(view_id, str) or not view_id.strip():
+            errors.append(f"referenceViews[{index}].id is required")
+            continue
+        if view_id in seen_ids:
+            errors.append(f"duplicate referenceViews id {view_id!r}")
+        seen_ids.add(view_id)
+        role = item.get("role")
+        if not isinstance(role, str) or not role.strip():
+            errors.append(f"referenceViews[{index}].role is required")
+        else:
+            role_key = role.strip().lower()
+            if role_key not in valid_roles:
+                warnings.append(
+                    f"referenceViews {view_id!r} role {role!r} is non-standard; prefer {sorted(valid_roles)}"
+                )
+            roles.add(role_key)
+        path = item.get("path")
+        if path is not None and (not isinstance(path, str) or not path.strip()):
+            errors.append(f"referenceViews {view_id!r} path must be a non-empty string when present")
+        confidence = item.get("confidence")
+        if confidence is not None:
+            validate_unit_interval(confidence, f"referenceViews {view_id!r} confidence", errors)
+        region = item.get("imageRegion")
+        if region is not None:
+            if not isinstance(region, dict):
+                errors.append(f"referenceViews {view_id!r} imageRegion must be an object")
+            else:
+                for key in ("x", "y", "width", "height"):
+                    if key in region and not is_number(region[key]):
+                        errors.append(f"referenceViews {view_id!r} imageRegion.{key} must be numeric")
+        camera = item.get("referenceCamera")
+        if camera is not None and not isinstance(camera, dict):
+            errors.append(f"referenceViews {view_id!r} referenceCamera must be an object when present")
+    if len(views) >= 2:
+        if "side" not in roles and "back" not in roles:
+            warnings.append(
+                "quality: referenceViews has multiple entries but no side/back role; "
+                "label panels or files so proportion locks and projection can use them"
+            )
+        source = spec.get("sourceImage")
+        if isinstance(source, str) and source.strip():
+            paths = {
+                str(item.get("path")).strip()
+                for item in views
+                if isinstance(item, dict) and item.get("path")
+            }
+            if source.strip() not in paths:
+                warnings.append(
+                    "sourceImage is set but does not match any referenceViews.path; "
+                    "keep sourceImage as the primary/default view alias"
+                )
+    elif len(views) == 1:
+        warnings.append(
+            "only one referenceViews entry present; request front/side/back when hidden geometry or likeness matters"
+        )
+    return roles
+
+
 def validate_evidence(spec: dict[str, Any], errors: list[str], warnings: list[str]) -> set[str]:
     refs: set[str] = set()
     evidence = spec.get("viewEvidence", [])
@@ -890,6 +974,8 @@ def validate_self_correct_loop(spec: dict[str, Any], errors: list[str], warnings
                 "enabled",
                 "adaptiveEscalation",
                 "singleImagePairOnly",
+                "matchedViewPairRequired",
+                "multiViewSheetAllowed",
             ):
                 value = feature_policy.get(field)
                 if value is not None and not isinstance(value, bool):
@@ -1662,6 +1748,7 @@ def validate_spec(spec: dict[str, Any]) -> tuple[list[str], list[str]]:
     build_pass_ids = validate_build_passes(spec, errors, warnings)
     validate_sculpt_pipeline(spec, build_pass_ids, errors, warnings)
     validate_look_dev_targets(spec, errors, warnings)
+    validate_reference_views(spec, errors, warnings)
     evidence_ids = validate_evidence(spec, errors, warnings)
     material_ids = validate_materials(spec, errors, warnings)
     validate_components(spec, material_ids, evidence_ids, errors, warnings)

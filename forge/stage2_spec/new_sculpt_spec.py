@@ -9,6 +9,18 @@ import re
 import sys
 from pathlib import Path
 
+_SHARED = Path(__file__).resolve().parents[1] / "_shared"
+if str(_SHARED) not in sys.path:
+    sys.path.insert(0, str(_SHARED))
+
+from reference_views import (  # noqa: E402
+    make_view_evidence_from_views,
+    merge_reference_views,
+    parse_view_args,
+    primary_image_path,
+    roles_present,
+)
+
 
 def slugify(value: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "-", value.strip().lower()).strip("-")
@@ -411,7 +423,38 @@ def apply_character_template(spec: dict, anatomy: dict | None = None) -> dict:
     return spec
 
 
-def make_spec(target_name: str, image: str | None, assessment_payload: dict | None = None) -> dict:
+def _collect_reference_views(
+    image: str | None,
+    assessment_payload: dict | None,
+    cli_views: list[dict] | None = None,
+) -> list[dict]:
+    views: list[dict] = []
+    if assessment_payload:
+        for key in ("referenceViews",):
+            incoming = assessment_payload.get(key)
+            if isinstance(incoming, list):
+                views = merge_reference_views(views, incoming)
+        pre = assessment_payload.get("preSpecAssessment")
+        if isinstance(pre, dict) and isinstance(pre.get("referenceViews"), list):
+            views = merge_reference_views(views, pre["referenceViews"])
+    if cli_views:
+        views = merge_reference_views(views, cli_views)
+    if image and not views:
+        views = parse_view_args([image])
+    elif image and views:
+        # keep bare --image as primary alias when not already present
+        primary = primary_image_path(views)
+        if not primary:
+            views = merge_reference_views(views, parse_view_args([image]))
+    return views
+
+
+def make_spec(
+    target_name: str,
+    image: str | None,
+    assessment_payload: dict | None = None,
+    cli_views: list[dict] | None = None,
+) -> dict:
     target_id = slugify(target_name)
     pre_spec_assessment = make_pre_spec_assessment(target_name)
     quality_contract = make_quality_contract()
@@ -422,6 +465,17 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
             pre_spec_assessment = incoming_assessment
         if isinstance(incoming_contract, dict):
             quality_contract = incoming_contract
+    reference_views = _collect_reference_views(image, assessment_payload, cli_views)
+    primary = primary_image_path(reference_views, image)
+    pre_spec_assessment["sourceImage"] = primary or pre_spec_assessment.get("sourceImage", "")
+    pre_spec_assessment["referenceViews"] = reference_views
+    roles = roles_present(reference_views)
+    multi_view = len(reference_views) >= 2
+    if multi_view:
+        pre_spec_assessment.setdefault("specDepthDecision", {})
+        pre_spec_assessment["specDepthDecision"]["hasMultiViewReferences"] = True
+        pre_spec_assessment["specDepthDecision"]["observedViewRoles"] = sorted(roles)
+        pre_spec_assessment["specDepthDecision"]["needsMultipleReviewViews"] = True
     return {
         "targetName": target_name,
         "targetId": target_id,
@@ -462,7 +516,8 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
             ],
             "descriptionRule": "Use measurable 3D graphics terms. Avoid vague words unless they are paired with concrete geometry/material/shader parameters.",
         },
-        "sourceImage": image or "",
+        "sourceImage": primary,
+        "referenceViews": reference_views,
         "referenceCamera": {
             "solved": False,
             "fovDegrees": 40.0,
@@ -471,7 +526,8 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
             "positionHint": [0.0, 0.0, 3.0],
             "note": (
                 "For likeness work, solve the reference camera (forge/stage1_intake/solve_camera_pose.py) so the "
-                "review render aligns with the photo and the reference can be projected. Confirm by overlay review."
+                "review render aligns with the photo and the reference can be projected. Confirm by overlay review. "
+                "When referenceViews has multiple roles, solve/store a camera per view (or under each view.referenceCamera)."
             ),
         },
         "suitability": "conditional",
@@ -499,7 +555,10 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
                 "secondary lighting match",
             ],
             "fpsTarget": 60,
-            "reviewViewpoints": ["front", "three-quarter", "side"],
+            "reviewViewpoints": (
+                [role for role in ("front", "three-quarter", "side", "back") if role in roles]
+                or ["front", "three-quarter", "side"]
+            ),
         },
         "selfCorrectLoop": {
             "enabled": True,
@@ -525,8 +584,15 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
                     "criticalDefaultThreshold": 0.8,
                     "importantAverageThreshold": 0.65,
                     "adaptiveEscalation": True,
-                    "singleImagePairOnly": True,
-                    "selectionRule": "Choose only the most visually salient, identity-defining, user-prioritized, or high-risk semantic systems. Group repeated parts instead of reviewing every mesh. AI vision scores every selected feature from the same full reference/render pair.",
+                    "singleImagePairOnly": not multi_view,
+                    "matchedViewPairRequired": True,
+                    "multiViewSheetAllowed": multi_view,
+                    "selectionRule": (
+                        "Choose only the most visually salient, identity-defining, user-prioritized, or high-risk "
+                        "semantic systems. Group repeated parts instead of reviewing every mesh. AI vision scores "
+                        "every selected feature from one packaged sheet: either a single matched reference/render "
+                        "pair, or one multi-panel turnaround sheet (matched angles only)."
+                    ),
                 },
             },
             "reviewAfterPasses": [
@@ -577,7 +643,11 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
                 "preferredCapture": "in-app-browser-screenshot",
                 "fallbackCapture": "user-supplied-screenshot-path",
                 "minimumEvidence": "Each visual pass needs a reference image, rendered screenshot, side-by-side comparison sheet, AI vision score, layer scores, and critique before choosing continue.",
-                "reviewPairRule": "Compare the same camera/viewpoint whenever possible; do not judge a front reference against a random render angle.",
+                "reviewPairRule": (
+                    "Compare the same camera/viewpoint whenever possible; do not judge a front reference against a "
+                    "random render angle. With multi-angle references, package matched pairs or one turnaround grid "
+                    "via stage4_review/make_comparison_sheet.py --pair/--turnaround."
+                ),
                 "acceptanceAuthority": "AI vision review of the comparison sheet. Code-generated pixel similarity is not sufficient evidence.",
             },
         },
@@ -738,9 +808,13 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
         },
         "assumptions": [],
         "coordinateFrame": {
-            "front": "camera-facing side in the reference image",
-            "up": "image up direction",
-            "scaleReference": "unit scale; adjust after first browser render",
+            "front": (
+                "camera-facing side in the primary/front reference view"
+                if "front" in roles or "primary" in roles
+                else "camera-facing side in the reference image"
+            ),
+            "up": "image up direction (matched across turnaround panels when available)",
+            "scaleReference": "unit scale; lock height across multi-view panels before adjusting after first browser render",
         },
         "silhouette": {
             "boundingShape": "",
@@ -750,21 +824,7 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
             "negativeSpaces": [],
             "landmarks": [],
         },
-        "viewEvidence": [
-            {
-                "id": "full-object",
-                "view": "primary",
-                "imageRegion": {
-                    "x": 0.0,
-                    "y": 0.0,
-                    "width": 1.0,
-                    "height": 1.0,
-                    "units": "normalized",
-                },
-                "observations": [],
-                "confidence": 0.5,
-            }
-        ],
+        "viewEvidence": make_view_evidence_from_views(reference_views),
         "componentTree": [
             {
                 "id": "root",
@@ -1070,10 +1130,12 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
         "lightingFromPhoto": [],
         "proceduralStrategy": [
             "Block out macro silhouette first.",
+            "When referenceViews includes side/back, lock proportions against those angles before deepening form.",
             "Add component hierarchy and joints.",
             "Create stable pivot groups, sockets, collider proxies, and destruction metadata before visual polish.",
             "Refine forms with bevels, tapers, bends, and procedural noise.",
             "Run reference PBR extraction for important source-image materials and stop when confidence is below the target threshold.",
+            "Prefer multi-view projection (observed side/back) over mirror-symmetry when those roles exist.",
             "Add material variation before adding expensive micro-geometry.",
         ],
         "animationAnchors": [
@@ -1088,10 +1150,37 @@ def make_spec(target_name: str, image: str | None, assessment_payload: dict | No
     }
 
 
+def _load_reference_views_file(path: Path | None) -> list[dict]:
+    if path is None:
+        return []
+    data = json.loads(path.expanduser().resolve().read_text(encoding="utf-8"))
+    if isinstance(data, dict) and isinstance(data.get("referenceViews"), list):
+        return data["referenceViews"]
+    if isinstance(data, list):
+        return data
+    raise ValueError(f"{path} must contain a referenceViews array or be an array of views")
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("target_name", help="Human-readable object name")
-    parser.add_argument("--image", help="Reference image path or URL")
+    parser.add_argument(
+        "--image",
+        action="append",
+        default=[],
+        help="Reference image path/URL, or role=path (repeatable for multi-angle sets)",
+    )
+    parser.add_argument(
+        "--view",
+        action="append",
+        default=[],
+        help="Alias for --image role=path (repeatable)",
+    )
+    parser.add_argument(
+        "--reference-views",
+        type=Path,
+        help="JSON from stage1_intake/slice_reference_views.py (or a referenceViews array)",
+    )
     parser.add_argument("--assessment", type=Path, help="Pre-spec assessment JSON from stage2_spec/new_pre_spec_assessment.py")
     parser.add_argument("--out", type=Path, help="Output JSON path")
     parser.add_argument("--force", action="store_true", help="Overwrite output file")
@@ -1100,7 +1189,17 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     assessment = load_assessment(args.assessment)
-    spec = make_spec(args.target_name, args.image, assessment)
+    try:
+        cli_views = merge_reference_views(
+            _load_reference_views_file(args.reference_views),
+            parse_view_args(list(args.image) + list(args.view)),
+        )
+    except (ValueError, OSError, json.JSONDecodeError) as exc:
+        parser.error(str(exc))
+    primary = primary_image_path(cli_views) or (args.image[0] if args.image else None)
+    if primary and "=" in str(primary):
+        primary = parse_view_args([primary])[0]["path"]
+    spec = make_spec(args.target_name, primary, assessment, cli_views=cli_views)
     domain = None
     if isinstance(assessment, dict):
         pre = assessment.get("preSpecAssessment", {})

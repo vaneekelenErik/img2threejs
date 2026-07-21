@@ -212,6 +212,7 @@ The single largest likeness win, per section 13, is to stop hand-sculpting faces
 
 5. Turnaround / reference-plane workflow:
    - Follow the artist standard: front, side, and (when available) back orthographic references at matched height, a proportion grid in head-units, silhouette-first blockout per view, and a color palette captured alongside. When only one view exists, mark it and request more via `request-input`.
+   - **Implemented (v1.2.1):** `forge/stage1_intake/slice_reference_views.py` packages separate files or slices a turnaround sheet into `referenceViews[]`; specs/assessments accept `--reference-views` / `--image role=path`; `make_comparison_sheet.py --pair/--turnaround` packages matched multi-view review sheets; `bake_projected_texture.py --view` records multi-view projection plans. Agent vision still labels roles and scores; scripts only package/gate. See `grimoire/intake/multi_view_references.md`.
 
 6. Rig and deform in Three.js:
    - Emit a `SkinnedMesh` with a joint skeleton for the body and morph targets / blend shapes for facial expression, exportable as glTF. Keep predictable topology so blendshapes deform cleanly (retopology principle). Expose the skeleton and morph channels through `root.userData.sculptRuntime`.
