@@ -11,3 +11,10 @@ __pycache__/
 
 # Scratch / generated review artifacts (keep committed demos in assets/)
 *.tmp
+
+# Local reconstruction scratch (keep scaffold READMEs; ignore bulky local media/renders)
+reconstructions/*/renders/
+reconstructions/*/reference.*
+!reconstructions/*/.gitkeep
+!reconstructions/*/README.md
+!reconstructions/*/PROMPT.md

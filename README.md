@@ -105,6 +105,27 @@ After every pass the agent chooses exactly one action: `continue`, `refine-spec`
 
 ## Quick start
 
+### Local Cursor Desktop (required for image attachments)
+
+Cursor Cloud agents cannot receive binary image attachments. For any rebuild that needs your photo or turnaround sheet, clone the repo and open it in **Cursor Desktop**:
+
+```bash
+git clone https://github.com/vaneekelenerik/img2threejs.git
+cd img2threejs
+# optional: work on a reconstruction branch
+git checkout cursor/pearl-smart-ring-24b0
+```
+
+1. Drop the reference under `reconstructions/<subject>/reference.png` (see [reconstructions/pearl-smart-ring/](reconstructions/pearl-smart-ring/) for a ready scaffold).
+2. Open the repo in Cursor Desktop → Agent mode.
+3. Attach the image (or `@`-mention the path) and invoke the skill — paste from `reconstructions/pearl-smart-ring/PROMPT.md` or:
+
+   ```
+   Use the img2threejs skill (SKILL.md). Rebuild this as a Three.js model.
+   ```
+
+### Install as a Claude / Codex skill
+
 1. **Install** — place this folder in your skills directory:
 
    ```bash
