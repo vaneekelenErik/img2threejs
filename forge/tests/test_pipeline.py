@@ -214,6 +214,7 @@ class PipelineTest(unittest.TestCase):
     def test_new_upgrade_scripts_help(self):
         for script in ("stage1_intake/build_detail_inventory.py", "stage1_intake/extract_landmarks.py",
                        "stage1_intake/solve_camera_pose.py", "stage1_intake/delight_albedo.py",
+                       "stage1_intake/slice_reference_views.py",
                        "stage3_build/bake_projected_texture.py"):
             r = run(script, "--help")
             self.assertEqual(r.returncode, 0, f"{script}: {r.stderr}")
@@ -271,6 +272,150 @@ class PipelineTest(unittest.TestCase):
         ts = out.read_text()
         self.assertIn("createPersonModel", ts)
         self.assertIn('meshes["head"]', ts)
+
+    # ---- multi-view / multi-angle references ----
+
+    def test_slice_reference_views_from_sheet(self):
+        sheet = self.dir / "turnaround.png"
+        write_png(sheet, 180, 60)
+        out_dir = self.dir / "views"
+        out = self.dir / "reference-views.json"
+        r = run(
+            "stage1_intake/slice_reference_views.py",
+            sheet,
+            "--layout",
+            "row-3",
+            "--out-dir",
+            out_dir,
+            "--out",
+            out,
+            "--force",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        payload = json.loads(out.read_text())
+        self.assertEqual(len(payload["referenceViews"]), 3)
+        roles = {v["role"] for v in payload["referenceViews"]}
+        self.assertEqual(roles, {"front", "side", "back"})
+        self.assertTrue((out_dir / "front.png").exists())
+        self.assertTrue(payload["coverage"]["hasSide"])
+
+    def test_slice_reference_views_separate_files(self):
+        front = self.dir / "front.png"
+        side = self.dir / "side.png"
+        write_png(front)
+        write_png(side)
+        out = self.dir / "views.json"
+        r = run(
+            "stage1_intake/slice_reference_views.py",
+            "--view",
+            f"front={front}",
+            "--view",
+            f"side={side}",
+            "--out",
+            out,
+            "--force",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        payload = json.loads(out.read_text())
+        self.assertEqual(payload["coverage"]["viewCount"], 2)
+        self.assertEqual(payload["sourceImage"], str(front.resolve()))
+
+    def test_assessment_and_spec_accept_multi_view(self):
+        front = self.dir / "front.png"
+        side = self.dir / "side.png"
+        back = self.dir / "back.png"
+        write_png(front)
+        write_png(side)
+        write_png(back)
+        r = run(
+            "stage2_spec/new_pre_spec_assessment.py",
+            "Crate",
+            "--image",
+            f"front={front}",
+            "--image",
+            f"side={side}",
+            "--image",
+            f"back={back}",
+            "--complexity",
+            "moderate",
+            "--out",
+            self.assessment,
+            "--force",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        assessment = json.loads(self.assessment.read_text())
+        self.assertEqual(len(assessment["referenceViews"]), 3)
+        self.assertTrue(assessment["preSpecAssessment"]["specDepthDecision"]["hasMultiViewReferences"])
+
+        r = run(
+            "stage2_spec/new_sculpt_spec.py",
+            "Crate",
+            "--assessment",
+            self.assessment,
+            "--out",
+            self.spec,
+            "--force",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        spec = json.loads(self.spec.read_text())
+        self.assertGreaterEqual(len(spec["referenceViews"]), 3)
+        self.assertIn("side", spec["qualityTargets"]["reviewViewpoints"])
+        self.assertTrue(spec["selfCorrectLoop"]["visualAcceptance"]["featureReviewPolicy"]["multiViewSheetAllowed"])
+        evidence_views = {item.get("view") for item in spec["viewEvidence"]}
+        self.assertIn("front", evidence_views)
+        self.assertIn("side", evidence_views)
+        self.assertEqual(run("stage2_spec/validate_sculpt_spec.py", self.spec).returncode, 0)
+
+    def test_multi_pair_comparison_sheet(self):
+        front_ref = self.dir / "front-ref.png"
+        front_ren = self.dir / "front-ren.png"
+        side_ref = self.dir / "side-ref.png"
+        side_ren = self.dir / "side-ren.png"
+        for path in (front_ref, front_ren, side_ref, side_ren):
+            write_png(path)
+        cmp = self.dir / "turnaround-cmp.png"
+        r = run(
+            "stage4_review/make_comparison_sheet.py",
+            "--turnaround",
+            "--pair",
+            f"front:{front_ref},{front_ren}",
+            "--pair",
+            f"side:{side_ref},{side_ren}",
+            "--out",
+            cmp,
+            "--json",
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(cmp.exists() and cmp.stat().st_size > 0)
+        payload = json.loads(r.stdout)
+        self.assertEqual(payload["rowCount"], 2)
+        self.assertEqual(len(payload["pairs"]), 2)
+
+    def test_bake_projected_texture_multi_view_upgrade(self):
+        front = self.dir / "front.png"
+        side = self.dir / "side.png"
+        back = self.dir / "back.png"
+        write_png(front)
+        write_png(side)
+        write_png(back)
+        out = self.dir / "bake.json"
+        r = run(
+            "stage3_build/bake_projected_texture.py",
+            "--reference-image",
+            front,
+            "--view",
+            f"side={side}",
+            "--view",
+            f"back={back}",
+            "--mesh-id",
+            "root",
+            "--out",
+            out,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        desc = json.loads(out.read_text())["projectedTextureBake"]
+        self.assertGreaterEqual(len(desc["projectionViews"]), 3)
+        self.assertEqual(desc["unseenRegionStrategy"]["mode"], "observed-multi-view")
 
 
 if __name__ == "__main__":
