@@ -70,6 +70,11 @@ Division of labor: **Python scripts enforce structure and package evidence; the 
 - Projection bake is a descriptor only — actual GPU projection is a Three.js runtime step.
 - Character likeness maximization (v1.3) still planned beyond current multi-view packaging.
 
+## Environment notes
+
+- Skill installed in this environment at `~/.claude/skills/img2threejs` → symlink to `/workspace` (includes multi-view branch).
+- Invoke in Claude Code with `/img2threejs …`. In Cursor, point the agent at `SKILL.md` / the skill folder and attach the reference image.
+
 ## Next steps
 
 - Wire per-view cameras into character likeness demos.
