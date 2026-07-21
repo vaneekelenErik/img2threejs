@@ -106,17 +106,24 @@ After every pass the agent chooses exactly one action: `continue`, `refine-spec`
 
 ## Quick start
 
-1. **Install** — place this folder in your skills directory:
+1. **Install**
+
+   - **Cursor (this repo):** already wired as a project skill at `.cursor/skills/img2threejs/`. Open a **new** Agent chat and type `/img2threejs`.
+   - **Claude Code / global:** place the folder in your skills directory:
 
    ```bash
    git clone https://github.com/hoainho/img2threejs.git ~/.claude/skills/img2threejs
+   # Cursor global alternative:
+   # ln -s "$(pwd)" ~/.cursor/skills/img2threejs
    ```
 
-2. **Invoke** — in Claude Code, attach or point to an object image and run:
+2. **Invoke** — in Cursor Agent or Claude Code, attach or point to an object image and run:
 
    ```
    /img2threejs Rebuild this object as a Three.js model, keep the proportions, angles, and colours.
    ```
+
+   If `/img2threejs` does not appear in a Cloud Agent slash menu, attach the image and ask: “Use the img2threejs skill (`.cursor/skills/img2threejs`) …” — or `@` the skill / root `SKILL.md`.
 
 3. **Follow the pipeline** — the skill validates the image, writes an assessment and spec, generates the factory pass by pass, and shows you a side-by-side comparison at each step until the render matches.
 

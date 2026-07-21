@@ -72,8 +72,9 @@ Division of labor: **Python scripts enforce structure and package evidence; the 
 
 ## Environment notes
 
-- Skill installed in this environment at `~/.claude/skills/img2threejs` → symlink to `/workspace` (includes multi-view branch).
-- Invoke in Claude Code with `/img2threejs …`. In Cursor, point the agent at `SKILL.md` / the skill folder and attach the reference image.
+- **Cursor project skill (required for `/img2threejs` in Cursor):** `.cursor/skills/img2threejs/SKILL.md` (plus `forge`/`grimoire` symlinks). Also mirrored at `.agents/skills/img2threejs` and `~/.cursor/skills/img2threejs`, `~/.claude/skills/img2threejs`.
+- Invoke in Cursor Agent: type `/img2threejs` (new Agent chat after install). Cloud `/` menus sometimes only list built-ins — then attach the image and say “use the img2threejs skill” or `@SKILL.md`.
+- Claude Code: `/img2threejs …` with skill at `~/.claude/skills/img2threejs`.
 
 ## Next steps
 
